@@ -94,9 +94,9 @@ docker compose up -d --build
 The following files and directories are bind-mounted between the host and container to ensure data persists across container restarts and host reboots:
 
 - [`words/`](words/): Contains dictionary and tracking lists:
-  - [`words/externalused.txt`](words/externalused.txt): External list of previously tested keys (read-only by the script).
-  - [`words/scriptused.txt`](words/scriptused.txt): Appended with words tested by this automation.
-  - [`words/wordlist.txt`](words/wordlist.txt): Wordlist source file.
+  - [`words/externalused.txt`](words/externalused.txt): External list of previously tested keys (read-only by the script). You should add to this file any keys that were tested by other people.
+  - [`words/scriptused.txt`](words/scriptused.txt): Words that are tested by this automation.
+  - [`words/wordlist.txt`](words/wordlist.txt): Wordlist source file. (Pre filled with top 100k English words. If you have a better list of words to test you should change this file)
 - [`logs.txt`](logs.txt): Real-time formatted log entries (GMT+7).
 - [`.env`](.env): Credentials configuration.
 
