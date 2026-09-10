@@ -1,0 +1,13 @@
+services:
+  passguesser:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: passguesser9001
+    restart: unless-stopped
+    environment:
+      - TZ=Asia/Bangkok
+    volumes:
+      - ./words:/app/words
+      - ./logs.txt:/app/logs.txt
+      - ./.env:/app/.env
