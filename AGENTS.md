@@ -33,6 +33,7 @@ PassGuesser9001/
 ├── .dockerignore           # Build context exclusions (node_modules, dist, .git)
 ├── .gitignore              # Git ignore rules
 ├── logs.txt                # Standardized execution logs (real-time, GMT+7)
+├── response/               # Returned HTML snapshots for debugging (UNIXTIMESTAMP.html)
 ├── words/                  # Wordlists and tracked keys directory
 │   ├── wordlist.txt        # 100k common English dictionary words
 │   ├── externalused.txt    # Keys tested by external systems (STRICTLY READ-ONLY)
@@ -59,7 +60,7 @@ PassGuesser9001/
    - Success is verified by checking whether the returned HTML no longer has the input box (`name="key"`). If the input box is still present in the returned HTML, the attempt was not unlocked.
    - Append a word to [`words/scriptused.txt`](words/scriptused.txt) **ONLY** if:
      - The attempt resulted in the wrong key error (`"Wrong key — check your working."`).
-     - OR the attempt was successful (`"Successful login attempt"`).
+     - OR the attempt was successful (`"Successful login attempt: <word>"`).
    - If the script fails for **any other reason** (e.g., rate limit `"Too many wrong attempts — wait an hour."`, missing inputs, network timeout, session expiration), the word **MUST NOT** be recorded in [`words/scriptused.txt`](words/scriptused.txt).
 
 4. **Logging Format ([`logs.txt`](logs.txt))**:

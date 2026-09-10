@@ -45,6 +45,8 @@ RUN npm run build
 # Copy words directory and logs.txt
 COPY words ./words
 COPY logs.txt ./
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+RUN mkdir -p /app/response && mkdir -p /root/.cache && ln -snf /ms-playwright /root/.cache/ms-playwright
 
 # Setup runner scripts and cron schedule
 COPY cron-runner.sh entrypoint.sh ./

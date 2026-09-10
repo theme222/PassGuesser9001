@@ -27,6 +27,7 @@ echo "$NOW" > "$TIMESTAMP_FILE"
 
 cd /app
 export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH"
+export PLAYWRIGHT_BROWSERS_PATH="${PLAYWRIGHT_BROWSERS_PATH:-/ms-playwright}"
 
 # Run automation script
 npm start

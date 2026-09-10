@@ -11,8 +11,27 @@ const WORDLIST_PATH = path.resolve(WORDS_DIR, "wordlist.txt");
 const SCRIPT_USED_PATH = path.resolve(WORDS_DIR, "scriptused.txt");
 const EXTERNAL_USED_PATH = path.resolve(WORDS_DIR, "externalused.txt");
 const LOGS_PATH = path.resolve(process.cwd(), "logs.txt");
+const RESPONSE_DIR = path.resolve(process.cwd(), "response");
 
 type LogStatus = "ERROR" | "INVALID" | "SUCCESS";
+
+/**
+ * Saves a copy of the returned HTML into the response/ subfolder as UNIXTIMESTAMP.html.
+ */
+function saveResponseHtml(html: string): string {
+  if (!fs.existsSync(RESPONSE_DIR)) {
+    fs.mkdirSync(RESPONSE_DIR, { recursive: true });
+  }
+  const timestamp = Math.floor(Date.now() / 1000);
+  let filename = `${timestamp}.html`;
+  let filePath = path.join(RESPONSE_DIR, filename);
+  if (fs.existsSync(filePath)) {
+    filename = `${timestamp}_${Date.now()}.html`;
+    filePath = path.join(RESPONSE_DIR, filename);
+  }
+  fs.writeFileSync(filePath, html, "utf-8");
+  return filename;
+}
 
 /**
  * Formats a Date object into 'yyyy/mm/dd hh:mm:ss.ms'.
@@ -38,12 +57,10 @@ function writeLog(status: LogStatus, message: string) {
   const line = `[${status}] <${timestamp}> "${cleanMsg}"`;
   fs.appendFileSync(LOGS_PATH, `${line}\n`, "utf-8");
 
-  if (process.env.VERBOSE) {
-    if (status === "ERROR" || status === "INVALID") {
-      process.stderr.write(`${line}\n`);
-    } else {
-      process.stdout.write(`${line}\n`);
-    }
+  if (status === "ERROR" || status === "INVALID") {
+    process.stderr.write(`${line}\n`);
+  } else {
+    process.stdout.write(`${line}\n`);
   }
 }
 
@@ -285,7 +302,42 @@ async function main() {
       return;
     }
 
-    // 7. Attempt to unlock Clue 1 with the three selected words one by one
+    // 7. Verify initial clue card state before attempting guesses
+    const initialClueCard = await findClue1Card(page);
+    if (!initialClueCard) {
+      writeLog("ERROR", "Unable to locate input box");
+      process.exit(1);
+    }
+
+    const initialHtml = await page.content();
+    const initialCardHtml = await initialClueCard.innerHTML().catch(() => "");
+    const initialHasInput =
+      initialHtml.includes('name="key"') ||
+      initialHtml.includes('placeholder="clue key"') ||
+      initialCardHtml.includes('name="key"');
+    const initialIsLocked =
+      initialCardHtml.includes("locked") ||
+      initialHtml.includes(">locked<");
+
+    // If Clue 1 is already unlocked
+    if (!initialHasInput && !initialIsLocked) {
+      writeLog("SUCCESS", "Successful login attempt (clue already unlocked)");
+      return;
+    }
+
+    // If already rate-limited before guessing
+    const initialRateLimited =
+      initialHtml.includes("Too many wrong attempts — wait an hour.") ||
+      (initialHtml.includes("Too many wrong attempts") && initialHtml.includes("wait an hour")) ||
+      initialHtml.includes("0 attempts left this hour.") ||
+      initialCardHtml.includes("0 attempts left this hour.");
+
+    if (initialRateLimited) {
+      writeLog("ERROR", "Too many wrong attempts — wait an hour.");
+      return;
+    }
+
+    // 8. Attempt to unlock Clue 1 with the three selected words one by one
     for (let i = 0; i < wordsToAttempt.length; i++) {
       const word = wordsToAttempt[i];
 
@@ -307,19 +359,42 @@ async function main() {
       // Fill in input box
       await keyInput.first().fill(word);
 
-      // Submit form and wait for the redirected HTTP 200 response
+      // Submit form and wait for response
+      let submitError: Error | null = null;
+      let submitStatus: number | null = null;
       try {
-        await Promise.all([
+        const [response] = await Promise.all([
           page.waitForResponse(
-            (res) => res.url().includes("clues.php") && res.status() === 200,
-            { timeout: 30000 }
+            (res) => res.url().includes("clues.php"),
+            { timeout: 20000 }
           ),
           unlockButton.first().click(),
         ]);
-      } catch {
-        await page.waitForLoadState("load").catch(() => null);
+        submitStatus = response.status();
+        await page.waitForLoadState("domcontentloaded", { timeout: 10000 }).catch(() => null);
+      } catch (err: unknown) {
+        submitError = err instanceof Error ? err : new Error(String(err));
       }
-      await page.waitForLoadState("networkidle").catch(() => null);
+
+      // Save a copy of the returned HTML into response/UNIXTIMESTAMP.html for debugging
+      try {
+        const attemptResponseHtml = await page.content();
+        saveResponseHtml(attemptResponseHtml);
+      } catch {
+        // Ignore if page content cannot be retrieved
+      }
+
+      // If submission timed out or failed, log ERROR and do NOT record word
+      if (submitError) {
+        writeLog("ERROR", `Form submission failed or timed out for word "${word}": ${submitError.message}`);
+        break;
+      }
+
+      if (submitStatus && submitStatus >= 400) {
+        writeLog("ERROR", `Server returned HTTP status ${submitStatus} when submitting word "${word}".`);
+        break;
+      }
+
       await page.waitForTimeout(500);
 
       // Verify if session was redirected back to login page
@@ -329,10 +404,22 @@ async function main() {
         return;
       }
 
-      // Check if the returned HTML still has the input box or is locked
+      // Verify we are still on the clues page
+      if (!page.url().includes("clues.php")) {
+        writeLog("ERROR", `Unexpected redirection to ${page.url()} during clue attempts.`);
+        process.exitCode = 1;
+        return;
+      }
+
+      // Check the returned page and Clue 1 card
       const returnedHtml = await page.content();
       const updatedClueCard = await findClue1Card(page);
-      const cardHtml = updatedClueCard ? await updatedClueCard.innerHTML().catch(() => "") : "";
+      if (!updatedClueCard) {
+        writeLog("ERROR", "Unable to locate input box");
+        process.exit(1);
+      }
+
+      const cardHtml = await updatedClueCard.innerHTML().catch(() => "");
 
       const hasInputBox =
         returnedHtml.includes('name="key"') ||
@@ -341,32 +428,38 @@ async function main() {
 
       const isLocked =
         cardHtml.includes("locked") ||
-        returnedHtml.includes(">locked<") ||
-        returnedHtml.includes("0 attempts left this hour.");
+        returnedHtml.includes(">locked<");
 
-      if (hasInputBox || isLocked) {
-        // Returned HTML still has the input box or locked badge -> Not unlocked!
-        const isTooManyAttempts =
-          returnedHtml.includes("Too many wrong attempts — wait an hour.") ||
-          (returnedHtml.includes("Too many wrong attempts") && returnedHtml.includes("wait an hour")) ||
-          returnedHtml.includes("0 attempts left this hour.");
+      const isTooManyAttempts =
+        returnedHtml.includes("Too many wrong attempts — wait an hour.") ||
+        (returnedHtml.includes("Too many wrong attempts") && returnedHtml.includes("wait an hour")) ||
+        returnedHtml.includes("0 attempts left this hour.") ||
+        cardHtml.includes("0 attempts left this hour.");
 
-        if (isTooManyAttempts) {
-          writeLog("ERROR", "Too many wrong attempts — wait an hour.");
-          // DO NOT record in scriptused.txt because rate limit was triggered
-          break;
-        } else {
-          // Returned HTML still has input box -> wrong key attempt!
-          writeLog("INVALID", "Wrong key — check your working.");
-          appendToScriptUsed(word);
-          // Continue to the next word
-        }
-      } else {
-        // Returned HTML no longer has the input box and is not locked -> Successfully unlocked!
-        writeLog("SUCCESS", "Successful login attempt");
+      if (isTooManyAttempts) {
+        // The submitted guess was wrong and exhausted the hourly attempt limit
+        writeLog("INVALID", "Wrong key — check your working.");
         appendToScriptUsed(word);
+        writeLog("ERROR", "Too many wrong attempts — wait an hour.");
         break;
       }
+
+      if (hasInputBox || isLocked) {
+        // Returned HTML still has input box or locked badge -> wrong key attempt
+        writeLog("INVALID", "Wrong key — check your working.");
+        appendToScriptUsed(word);
+
+        // Pause for 3 seconds before attempting the next word to avoid HTTP 503 rate limits
+        if (i < wordsToAttempt.length - 1) {
+          await page.waitForTimeout(3000);
+        }
+        continue;
+      }
+
+      // Returned HTML no longer has input box and is not locked -> genuine unlock
+      writeLog("SUCCESS", `Successful login attempt: ${word}`);
+      appendToScriptUsed(word);
+      break;
     }
 
   } catch (err: unknown) {

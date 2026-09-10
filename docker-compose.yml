@@ -7,7 +7,9 @@ services:
     restart: unless-stopped
     environment:
       - TZ=Asia/Bangkok
+      - PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
     volumes:
       - ./words:/app/words
       - ./logs.txt:/app/logs.txt
       - ./.env:/app/.env
+      - ./response:/app/response
